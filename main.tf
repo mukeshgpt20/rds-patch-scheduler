@@ -68,4 +68,38 @@ resource "aws_iam_role_policy" "lambda_rds_patch_policy" {
 
 # Lambda Function
 resource "aws_lambda_function" "rds_patch_scheduler" {
-  function_name = "rds-patch
+  function_name = "rds-patch-scheduler"
+  role          = aws_iam_role.lambda_rds_patch.arn
+  runtime       = "python3.10"
+  handler       = "lambda_function.lambda_handler"
+  timeout       = 30
+
+  filename         = "lambda/lambda.zip"
+  source_code_hash = filebase64sha256("lambda/lambda.zip")
+
+  environment {
+    variables = {
+      SNS_TOPIC_ARN = aws_sns_topic.rds_patch_notifications.arn
+    }
+  }
+}
+
+# EventBridge Rule (Weekly Trigger)
+resource "aws_cloudwatch_event_rule" "rds_patch_schedule" {
+  name                = "rds-patch-schedule"
+  schedule_expression = "cron(55 14 ? * FRI *)" # 12:55 AM Saturday AEST
+}
+
+resource "aws_cloudwatch_event_target" "rds_patch_target" {
+  rule      = aws_cloudwatch_event_rule.rds_patch_schedule.name
+  target_id = "rds-patch-lambda"
+  arn       = aws_lambda_function.rds_patch_scheduler.arn
+}
+
+resource "aws_lambda_permission" "allow_eventbridge" {
+  statement_id  = "AllowExecutionFromEventBridge"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.rds_patch_scheduler.function_name
+  principal     = "events.amazonaws.com"
+  source_arn    = aws_cloudwatch_event_rule.rds_patch_schedule.arn
+}
